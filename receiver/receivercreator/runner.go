@@ -147,19 +147,32 @@ func (run *receiverRunner) loadRuntimeReceiverConfig(
 // mergeTemplateAndDiscoveredConfigs will unify the templated and discovered configs,
 // setting the `endpoint` field from the discovered one if 1. not specified by the user
 // and 2. determined to be supported (by trial and error of unmarshalling a temp intermediary).
+// For receivers implementing the Discoverable interface, use their custom validation instead.
 func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discovered userConfigMap) (*confmap.Conf, string, error) {
 	targetEndpoint := cast.ToString(templated[endpointConfigKey])
 	if _, endpointSet := discovered[tmpSetEndpointConfigKey]; endpointSet {
 		delete(discovered, tmpSetEndpointConfigKey)
 		targetEndpoint = cast.ToString(discovered[endpointConfigKey])
 
-		// confirm the endpoint we've added is supported, removing if not
-		endpointConfig := confmap.NewFromStringMap(map[string]any{
-			endpointConfigKey: targetEndpoint,
-		})
-		if err := endpointConfig.Unmarshal(factory.CreateDefaultConfig()); err != nil {
-			// we assume that the error is due to unused keys in the config, so we need to remove endpoint key
+		// Check if the receiver config implements Discoverable interface
+		defaultCfg := factory.CreateDefaultConfig()
+		if discoverable, ok := defaultCfg.(Discoverable); ok {
+			// For Discoverable receivers, use their custom validation
+			if err := discoverable.Validate(templated, targetEndpoint); err != nil {
+				return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
+			}
+			// Skip endpoint injection for discoverable receivers - they handle targeting internally
 			delete(discovered, endpointConfigKey)
+		} else {
+			// For non-discoverable receivers, use existing endpoint validation logic
+			// confirm the endpoint we've added is supported, removing if not
+			endpointConfig := confmap.NewFromStringMap(map[string]any{
+				endpointConfigKey: targetEndpoint,
+			})
+			if err := endpointConfig.Unmarshal(factory.CreateDefaultConfig()); err != nil {
+				// we assume that the error is due to unused keys in the config, so we need to remove endpoint key
+				delete(discovered, endpointConfigKey)
+			}
 		}
 	}
 	discoveredConfig := confmap.NewFromStringMap(discovered)

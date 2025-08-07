@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/targetallocator"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/receivercreator"
 )
 
 // Config defines configuration for Prometheus receiver.
@@ -58,6 +60,148 @@ func (cfg *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// Validate implements the receivercreator.Discoverable interface.
+// It validates that the rawCfg unmarshals to a prometheus configuration that
+// only scrapes from the discovered endpoint, ensuring security in discovery mode.
+func (cfg *Config) Validate(rawCfg map[string]any, discoveredEndpoint string) error {
+	// Create a temporary config to unmarshal the raw configuration
+	tempCfg := &Config{}
+	if err := tempCfg.unmarshalFromMap(rawCfg); err != nil {
+		return fmt.Errorf("failed to unmarshal prometheus config: %w", err)
+	}
+
+	// Validate that the prometheus config only targets the discovered endpoint
+	return validatePrometheusTargets(tempCfg.PrometheusConfig, discoveredEndpoint)
+}
+
+// unmarshalFromMap unmarshals a map into the Config struct
+func (cfg *Config) unmarshalFromMap(rawCfg map[string]any) error {
+	// Handle the nested "config" field which contains the actual prometheus configuration
+	if configMap, exists := rawCfg["config"]; exists {
+		if promCfgMap, ok := configMap.(map[string]any); ok {
+			cfg.PrometheusConfig = &PromConfig{}
+			return reloadPromConfig(cfg.PrometheusConfig, promCfgMap)
+		}
+		return errors.New("invalid config field format")
+	}
+	return errors.New("missing prometheus config field")
+}
+
+// validatePrometheusTargets validates that all targets in the prometheus configuration
+// only target the discovered endpoint, preventing scraping from unintended sources.
+func validatePrometheusTargets(promCfg *PromConfig, discoveredEndpoint string) error {
+	if promCfg == nil {
+		return errors.New("prometheus configuration is nil")
+	}
+
+	// Validate all scrape configs
+	for i, scrapeConfig := range promCfg.ScrapeConfigs {
+		if err := validateScrapeConfig(scrapeConfig, discoveredEndpoint, i); err != nil {
+			return err
+		}
+	}
+
+	// Note: We don't validate ScrapeConfigFiles here as they are loaded dynamically
+	// and would require file system access. The security model assumes that file-based
+	// configs are managed by the administrator.
+
+	return nil
+}
+
+// validateScrapeConfig validates a single scrape configuration
+func validateScrapeConfig(scrapeConfig *promconfig.ScrapeConfig, discoveredEndpoint string, index int) error {
+	if scrapeConfig == nil {
+		return fmt.Errorf("scrape config %d is nil", index)
+	}
+
+	// Validate static configs
+	for j, staticConfig := range scrapeConfig.StaticConfigs {
+		if err := validateStaticConfig(staticConfig, discoveredEndpoint, index, j); err != nil {
+			return err
+		}
+	}
+
+	// For service discovery configurations, we need to be more permissive as they are
+	// dynamic. However, we can still validate certain aspects.
+	if len(scrapeConfig.ServiceDiscoveryConfigs) > 0 {
+		// Allow service discovery, but log a warning as it might scrape unintended targets
+		// In a more strict implementation, you might want to disallow this entirely
+		slog.Warn("Service discovery configs detected in prometheus receiver discovery mode. "+
+			"Ensure your service discovery configuration only targets the intended endpoint.",
+			"scrape_config_index", index,
+			"discovered_endpoint", discoveredEndpoint)
+	}
+
+	return nil
+}
+
+// validateStaticConfig validates a static configuration targets
+func validateStaticConfig(staticConfig *promconfig.StaticConfig, discoveredEndpoint string, scrapeIndex, staticIndex int) error {
+	if staticConfig == nil {
+		return fmt.Errorf("static config %d in scrape config %d is nil", staticIndex, scrapeIndex)
+	}
+
+	// Check each target in the static config
+	for k, target := range staticConfig.Targets {
+		targetStr := string(target)
+		if err := validatePrometheusTarget(targetStr, discoveredEndpoint); err != nil {
+			return fmt.Errorf("invalid target %d in static config %d of scrape config %d: %w", k, staticIndex, scrapeIndex, err)
+		}
+	}
+
+	return nil
+}
+
+// validatePrometheusTarget validates that a prometheus target matches the discovered endpoint
+func validatePrometheusTarget(target, discoveredEndpoint string) error {
+	// Replace template references with the discovered endpoint for validation
+	target = strings.ReplaceAll(target, "`endpoint`", discoveredEndpoint)
+	target = strings.ReplaceAll(target, "${endpoint}", discoveredEndpoint)
+
+	// Parse the target to extract host information
+	targetHost := extractHostFromTarget(target)
+	if targetHost == "" {
+		return errors.New("could not extract host from target")
+	}
+
+	// The target host should match the discovered endpoint
+	if targetHost != discoveredEndpoint {
+		return fmt.Errorf("target host %s does not match discovered endpoint %s", targetHost, discoveredEndpoint)
+	}
+
+	return nil
+}
+
+// extractHostFromTarget extracts the host portion from a prometheus target
+func extractHostFromTarget(target string) string {
+	// Handle various target formats:
+	// - "host:port" (most common)
+	// - "http://host:port/path" (URL format)
+	// - "https://host:port/path" (HTTPS URL format)
+
+	// First, try to parse as URL
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		if u, err := url.Parse(target); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+
+	// If not a full URL, treat as host:port
+	// Handle IPv6 addresses in brackets [::1]:port
+	if strings.Contains(target, ":") {
+		if strings.HasPrefix(target, "[") {
+			// IPv6 format: [::1]:port
+			return target
+		} else {
+			// IPv4 format: host:port - return as-is since prometheus targets are typically host:port
+			return target
+		}
+	}
+
+	// If no port specified, return as-is (prometheus will use default port)
+	return target
 }
 
 // PromConfig is a redeclaration of promconfig.Config because we need custom unmarshaling
