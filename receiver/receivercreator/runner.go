@@ -149,32 +149,42 @@ func (run *receiverRunner) loadRuntimeReceiverConfig(
 // and 2. determined to be supported (by trial and error of unmarshalling a temp intermediary).
 // For receivers implementing the Discoverable interface, use their custom validation instead.
 func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discovered userConfigMap) (*confmap.Conf, string, error) {
-	targetEndpoint := cast.ToString(templated[endpointConfigKey])
-	if _, endpointSet := discovered[tmpSetEndpointConfigKey]; endpointSet {
-		delete(discovered, tmpSetEndpointConfigKey)
-		targetEndpoint = cast.ToString(discovered[endpointConfigKey])
+    // Determine the discovered target endpoint (prefer discovered over templated)
+    targetEndpoint := cast.ToString(discovered[endpointConfigKey])
+    if targetEndpoint == "" {
+        targetEndpoint = cast.ToString(templated[endpointConfigKey])
+    }
 
-		        // Check if the receiver config implements Discoverable interface
-        defaultCfg := factory.CreateDefaultConfig()
-        if discoverable, ok := defaultCfg.(Discoverable); ok {
-            // For Discoverable receivers, use their custom validation
+    // If the receiver implements Discoverable, always use its validation path and avoid endpoint injection
+    defaultCfg := factory.CreateDefaultConfig()
+    if discoverable, ok := defaultCfg.(Discoverable); ok {
+        if targetEndpoint != "" {
             if err := discoverable.ValidateDiscovery(templated, targetEndpoint); err != nil {
                 return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
             }
-            // Skip endpoint injection for discoverable receivers - they handle targeting internally
-            delete(discovered, endpointConfigKey)
-        } else {
-			// For non-discoverable receivers, use existing endpoint validation logic
-			// confirm the endpoint we've added is supported, removing if not
-			endpointConfig := confmap.NewFromStringMap(map[string]any{
-				endpointConfigKey: targetEndpoint,
-			})
-			if err := endpointConfig.Unmarshal(factory.CreateDefaultConfig()); err != nil {
-				// we assume that the error is due to unused keys in the config, so we need to remove endpoint key
-				delete(discovered, endpointConfigKey)
-			}
-		}
-	}
+        }
+        // Remove endpoint from both maps to avoid invalid keys on receivers that don't accept it
+        delete(templated, endpointConfigKey)
+        delete(discovered, endpointConfigKey)
+        // Clean tmp flag if present
+        delete(discovered, tmpSetEndpointConfigKey)
+    } else {
+        // Non-discoverable: only try to inject endpoint if it was auto-set by observerHandler
+        if _, endpointSet := discovered[tmpSetEndpointConfigKey]; endpointSet {
+            delete(discovered, tmpSetEndpointConfigKey)
+            if targetEndpoint == "" {
+                targetEndpoint = cast.ToString(discovered[endpointConfigKey])
+            }
+            // confirm the endpoint we've added is supported, removing if not
+            endpointConfig := confmap.NewFromStringMap(map[string]any{
+                endpointConfigKey: targetEndpoint,
+            })
+            if err := endpointConfig.Unmarshal(factory.CreateDefaultConfig()); err != nil {
+                // assume error due to unused keys in the config, so remove endpoint key
+                delete(discovered, endpointConfigKey)
+            }
+        }
+    }
 	discoveredConfig := confmap.NewFromStringMap(discovered)
 	templatedConfig := confmap.NewFromStringMap(templated)
 
