@@ -138,9 +138,11 @@ func TestConfig_Validate_Discoverable(t *testing.T) {
 					"scrape_configs": []any{
 						map[string]any{
 							"job_name": "http-app",
+							"scheme":   "http",
+							"metrics_path": "/metrics",
 							"static_configs": []any{
 								map[string]any{
-									"targets": []any{"http://10.1.2.3:8080/metrics"},
+									"targets": []any{"10.1.2.3:8080"},
 								},
 							},
 						},
@@ -157,9 +159,11 @@ func TestConfig_Validate_Discoverable(t *testing.T) {
 					"scrape_configs": []any{
 						map[string]any{
 							"job_name": "https-app",
+							"scheme":   "https",
+							"metrics_path": "/health",
 							"static_configs": []any{
 								map[string]any{
-									"targets": []any{"https://10.1.2.3:8443/metrics"},
+									"targets": []any{"10.1.2.3:8443"},
 								},
 							},
 						},
@@ -176,9 +180,11 @@ func TestConfig_Validate_Discoverable(t *testing.T) {
 					"scrape_configs": []any{
 						map[string]any{
 							"job_name": "wrong-host",
+							"scheme":   "http",
+							"metrics_path": "/metrics",
 							"static_configs": []any{
 								map[string]any{
-									"targets": []any{"http://wrong.host:8080/metrics"},
+									"targets": []any{"wrong.host:8080"},
 								},
 							},
 						},
@@ -222,7 +228,7 @@ func TestConfig_Validate_Discoverable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{}
-			err := cfg.Validate(tt.rawCfg, tt.discoveredEndpoint)
+			err := cfg.ValidateDiscovery(tt.rawCfg, tt.discoveredEndpoint)
 
 			if tt.expectError {
 				require.Error(t, err)

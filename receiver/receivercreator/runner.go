@@ -154,16 +154,16 @@ func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discove
 		delete(discovered, tmpSetEndpointConfigKey)
 		targetEndpoint = cast.ToString(discovered[endpointConfigKey])
 
-		// Check if the receiver config implements Discoverable interface
-		defaultCfg := factory.CreateDefaultConfig()
-		if discoverable, ok := defaultCfg.(Discoverable); ok {
-			// For Discoverable receivers, use their custom validation
-			if err := discoverable.Validate(templated, targetEndpoint); err != nil {
-				return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
-			}
-			// Skip endpoint injection for discoverable receivers - they handle targeting internally
-			delete(discovered, endpointConfigKey)
-		} else {
+		        // Check if the receiver config implements Discoverable interface
+        defaultCfg := factory.CreateDefaultConfig()
+        if discoverable, ok := defaultCfg.(Discoverable); ok {
+            // For Discoverable receivers, use their custom validation
+            if err := discoverable.ValidateDiscovery(templated, targetEndpoint); err != nil {
+                return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
+            }
+            // Skip endpoint injection for discoverable receivers - they handle targeting internally
+            delete(discovered, endpointConfigKey)
+        } else {
 			// For non-discoverable receivers, use existing endpoint validation logic
 			// confirm the endpoint we've added is supported, removing if not
 			endpointConfig := confmap.NewFromStringMap(map[string]any{

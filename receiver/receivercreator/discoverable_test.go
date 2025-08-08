@@ -9,52 +9,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
-	rcvr "go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver"
 )
-
-// mockDiscoverableReceiver implements both receiver.Factory and Discoverable for testing
-type mockDiscoverableReceiver struct {
-	validateFunc func(rawCfg map[string]any, discoveredEndpoint string) error
-}
-
-func (m *mockDiscoverableReceiver) Type() component.Type {
-	return component.MustNewType("mock_discoverable")
-}
-
-func (m *mockDiscoverableReceiver) CreateDefaultConfig() component.Config {
-	return &mockDiscoverableConfig{}
-}
-
-func (m *mockDiscoverableReceiver) CreateLogsReceiver(
-	ctx component.Config,
-	set rcvr.Settings,
-	nextConsumer component.Component,
-) (rcvr.Logs, error) {
-	return nil, nil
-}
-
-func (m *mockDiscoverableReceiver) CreateMetricsReceiver(
-	ctx component.Config,
-	set rcvr.Settings,
-	nextConsumer component.Component,
-) (rcvr.Metrics, error) {
-	return nil, nil
-}
-
-func (m *mockDiscoverableReceiver) CreateTracesReceiver(
-	ctx component.Config,
-	set rcvr.Settings,
-	nextConsumer component.Component,
-) (rcvr.Traces, error) {
-	return nil, nil
-}
 
 // mockDiscoverableConfig implements both component.Config and Discoverable
 type mockDiscoverableConfig struct {
 	validateFunc func(rawCfg map[string]any, discoveredEndpoint string) error
 }
 
-func (m *mockDiscoverableConfig) Validate(rawCfg map[string]any, discoveredEndpoint string) error {
+func (m *mockDiscoverableConfig) ValidateDiscovery(rawCfg map[string]any, discoveredEndpoint string) error {
 	if m.validateFunc != nil {
 		return m.validateFunc(rawCfg, discoveredEndpoint)
 	}
@@ -132,12 +95,10 @@ func TestMergeTemplatedAndDiscoveredConfigs_WithDiscoverableReceiver(t *testing.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock factory that returns discoverable config
-			factory := &mockDiscoverableReceiver{}
-			factory.CreateDefaultConfig = func() component.Config {
-				return &mockDiscoverableConfig{
-					validateFunc: tt.validateFunc,
-				}
-			}
+			factory := receiver.NewFactory(
+				component.MustNewType("mock_discoverable"),
+				func() component.Config { return &mockDiscoverableConfig{validateFunc: tt.validateFunc} },
+			)
 
 			result, endpoint, err := mergeTemplatedAndDiscoveredConfigs(factory, tt.templated, tt.discovered)
 
@@ -147,7 +108,6 @@ func TestMergeTemplatedAndDiscoveredConfigs_WithDiscoverableReceiver(t *testing.
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, result)
-				
 				// Verify endpoint was not injected for discoverable receivers
 				resultMap := result.ToStringMap()
 				_, hasEndpoint := resultMap[endpointConfigKey]
@@ -161,10 +121,10 @@ func TestMergeTemplatedAndDiscoveredConfigs_WithDiscoverableReceiver(t *testing.
 
 func TestMergeTemplatedAndDiscoveredConfigs_WithNonDiscoverableReceiver(t *testing.T) {
 	// Create mock factory that returns non-discoverable config
-	factory := &mockDiscoverableReceiver{}
-	factory.CreateDefaultConfig = func() component.Config {
-		return &mockNonDiscoverableConfig{}
-	}
+	factory := receiver.NewFactory(
+		component.MustNewType("mock_non_discoverable"),
+		func() component.Config { return &mockNonDiscoverableConfig{} },
+	)
 
 	templated := userConfigMap{
 		"collection_interval": "30s",

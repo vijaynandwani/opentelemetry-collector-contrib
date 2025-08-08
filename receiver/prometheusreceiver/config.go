@@ -13,14 +13,15 @@ import (
 	"strings"
 
 	commonconfig "github.com/prometheus/common/config"
+	model "github.com/prometheus/common/model"
 	promconfig "github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/discovery"
 	"github.com/prometheus/prometheus/discovery/kubernetes"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/confmap"
 	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/targetallocator"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/receivercreator"
 )
 
 // Config defines configuration for Prometheus receiver.
@@ -62,10 +63,9 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
-// Validate implements the receivercreator.Discoverable interface.
-// It validates that the rawCfg unmarshals to a prometheus configuration that
-// only scrapes from the discovered endpoint, ensuring security in discovery mode.
-func (cfg *Config) Validate(rawCfg map[string]any, discoveredEndpoint string) error {
+// ValidateDiscovery validates the rawCfg provided via discovery annotations and
+// ensures it would only scrape the discovered endpoint.
+func (cfg *Config) ValidateDiscovery(rawCfg map[string]any, discoveredEndpoint string) error {
 	// Create a temporary config to unmarshal the raw configuration
 	tempCfg := &Config{}
 	if err := tempCfg.unmarshalFromMap(rawCfg); err != nil {
@@ -96,16 +96,17 @@ func validatePrometheusTargets(promCfg *PromConfig, discoveredEndpoint string) e
 		return errors.New("prometheus configuration is nil")
 	}
 
+	// In discovery mode, disallow externalized configs to prevent bypassing validation
+	if len(promCfg.ScrapeConfigFiles) > 0 {
+		return errors.New("scrape_config_files are not allowed in discovery mode")
+	}
+
 	// Validate all scrape configs
 	for i, scrapeConfig := range promCfg.ScrapeConfigs {
 		if err := validateScrapeConfig(scrapeConfig, discoveredEndpoint, i); err != nil {
 			return err
 		}
 	}
-
-	// Note: We don't validate ScrapeConfigFiles here as they are loaded dynamically
-	// and would require file system access. The security model assumes that file-based
-	// configs are managed by the administrator.
 
 	return nil
 }
@@ -116,38 +117,21 @@ func validateScrapeConfig(scrapeConfig *promconfig.ScrapeConfig, discoveredEndpo
 		return fmt.Errorf("scrape config %d is nil", index)
 	}
 
-	// Validate static configs
-	for j, staticConfig := range scrapeConfig.StaticConfigs {
-		if err := validateStaticConfig(staticConfig, discoveredEndpoint, index, j); err != nil {
-			return err
-		}
-	}
-
-	// For service discovery configurations, we need to be more permissive as they are
-	// dynamic. However, we can still validate certain aspects.
-	if len(scrapeConfig.ServiceDiscoveryConfigs) > 0 {
-		// Allow service discovery, but log a warning as it might scrape unintended targets
-		// In a more strict implementation, you might want to disallow this entirely
-		slog.Warn("Service discovery configs detected in prometheus receiver discovery mode. "+
-			"Ensure your service discovery configuration only targets the intended endpoint.",
-			"scrape_config_index", index,
-			"discovered_endpoint", discoveredEndpoint)
-	}
-
-	return nil
-}
-
-// validateStaticConfig validates a static configuration targets
-func validateStaticConfig(staticConfig *promconfig.StaticConfig, discoveredEndpoint string, scrapeIndex, staticIndex int) error {
-	if staticConfig == nil {
-		return fmt.Errorf("static config %d in scrape config %d is nil", staticIndex, scrapeIndex)
-	}
-
-	// Check each target in the static config
-	for k, target := range staticConfig.Targets {
-		targetStr := string(target)
-		if err := validatePrometheusTarget(targetStr, discoveredEndpoint); err != nil {
-			return fmt.Errorf("invalid target %d in static config %d of scrape config %d: %w", k, staticIndex, scrapeIndex, err)
+	// Allow only static discovery; reject all other discovery mechanisms in discovery mode
+	for sdIdx, sd := range scrapeConfig.ServiceDiscoveryConfigs {
+		switch cfg := sd.(type) {
+		case discovery.StaticConfig:
+			// Validate each target group and target address
+			for tgIdx, tg := range cfg {
+				for tIdx, lbls := range tg.Targets {
+					addr := string(lbls[model.AddressLabel])
+					if err := validatePrometheusTarget(addr, discoveredEndpoint); err != nil {
+						return fmt.Errorf("invalid target %d in target_group %d of sd[%d] in scrape_config %d: %w", tIdx, tgIdx, sdIdx, index, err)
+					}
+				}
+			}
+		default:
+			return fmt.Errorf("service discovery type %T is not allowed in discovery mode (scrape_config index %d)", sd, index)
 		}
 	}
 

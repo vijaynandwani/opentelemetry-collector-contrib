@@ -7,11 +7,11 @@ package receivercreator // import "github.com/open-telemetry/opentelemetry-colle
 // Receivers implementing this interface can provide custom validation logic for their
 // configurations when used with the receiver creator's discovery mechanism.
 //
-// The Validate method ensures that the receiver configuration only scrapes from the
+// The ValidateDiscovery method ensures that the receiver configuration only scrapes from the
 // discovered endpoint, preventing security issues where a configuration might attempt
 // to scrape from unintended sources.
 type Discoverable interface {
-	// Validate validates that the rawCfg unmarshals to a valid configuration that
+	// ValidateDiscovery validates that the rawCfg unmarshals to a valid configuration that
 	// ensures the receiver will only collect data from the discoveredEndpoint.
 	//
 	// Parameters:
@@ -21,5 +21,5 @@ type Discoverable interface {
 	// Returns:
 	//   - error: nil if the configuration is valid and secure, or an error describing
 	//            why the configuration is invalid or potentially insecure
-	Validate(rawCfg map[string]any, discoveredEndpoint string) error
+	ValidateDiscovery(rawCfg map[string]any, discoveredEndpoint string) error
 }
