@@ -20,6 +20,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// getDiscoveredKeys returns the keys of a discovered config map for debugging
+func getDiscoveredKeys(m userConfigMap) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // runner starts and stops receiver instances.
 type runner interface {
 	// start a metrics receiver instance from its static config and discovered config.
@@ -159,6 +168,13 @@ func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discove
     defaultCfg := factory.CreateDefaultConfig()
     if discoverable, ok := defaultCfg.(Discoverable); ok {
         if targetEndpoint != "" {
+            // Debug: Log what we're about to pass to ValidateDiscovery
+            fmt.Printf("[DEBUG] runner.go: About to call ValidateDiscovery with discovered keys: %v\n", getDiscoveredKeys(discovered))
+            for k, v := range discovered {
+                fmt.Printf("[DEBUG] runner.go: discovered[%s] = %T: %v\n", k, v, v)
+            }
+            fmt.Printf("[DEBUG] runner.go: targetEndpoint = %s\n", targetEndpoint)
+            
             if err := discoverable.ValidateDiscovery(discovered, targetEndpoint); err != nil {
                 return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
             }

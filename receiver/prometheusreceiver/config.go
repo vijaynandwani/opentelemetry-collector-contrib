@@ -63,9 +63,25 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
+// getMapKeys returns the keys of a map for debugging
+func getMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // ValidateDiscovery validates the rawCfg provided via discovery annotations and
 // ensures it would only scrape the discovered endpoint.
 func (cfg *Config) ValidateDiscovery(rawCfg map[string]any, discoveredEndpoint string) error {
+	// Debug: Log the structure being passed to ValidateDiscovery
+	fmt.Printf("[DEBUG] ValidateDiscovery called with rawCfg keys: %v\n", getMapKeys(rawCfg))
+	for k, v := range rawCfg {
+		fmt.Printf("[DEBUG] rawCfg[%s] = %T: %v\n", k, v, v)
+	}
+	fmt.Printf("[DEBUG] discoveredEndpoint: %s\n", discoveredEndpoint)
+	
 	// Create a temporary config to unmarshal the raw configuration
 	tempCfg := &Config{}
 	if err := tempCfg.unmarshalFromMap(rawCfg); err != nil {
