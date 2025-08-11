@@ -158,6 +158,17 @@ func (run *receiverRunner) loadRuntimeReceiverConfig(
 // and 2. determined to be supported (by trial and error of unmarshalling a temp intermediary).
 // For receivers implementing the Discoverable interface, use their custom validation instead.
 func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discovered userConfigMap) (*confmap.Conf, string, error) {
+    // Debug: Log the input parameters to understand what we're starting with
+    fmt.Printf("[DEBUG] mergeTemplatedAndDiscoveredConfigs called:\n")
+    fmt.Printf("[DEBUG] templated keys: %v\n", getDiscoveredKeys(templated))
+    for k, v := range templated {
+        fmt.Printf("[DEBUG] templated[%s] = %T: %v\n", k, v, v)
+    }
+    fmt.Printf("[DEBUG] discovered keys: %v\n", getDiscoveredKeys(discovered))
+    for k, v := range discovered {
+        fmt.Printf("[DEBUG] discovered[%s] = %T: %v\n", k, v, v)
+    }
+    
     // Determine the discovered target endpoint (prefer discovered over templated)
     targetEndpoint := cast.ToString(discovered[endpointConfigKey])
     if targetEndpoint == "" {
