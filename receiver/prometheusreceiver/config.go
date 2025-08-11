@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -96,11 +97,33 @@ func (cfg *Config) ValidateDiscovery(rawCfg map[string]any, discoveredEndpoint s
 func (cfg *Config) unmarshalFromMap(rawCfg map[string]any) error {
 	// Handle the nested "config" field which contains the actual prometheus configuration
 	if configMap, exists := rawCfg["config"]; exists {
-		if promCfgMap, ok := configMap.(map[string]any); ok {
-			cfg.PrometheusConfig = &PromConfig{}
-			return reloadPromConfig(cfg.PrometheusConfig, promCfgMap)
+		// Handle both map[string]any and userConfigMap types
+		var promCfgMap map[string]any
+		switch v := configMap.(type) {
+		case map[string]any:
+			promCfgMap = v
+		default:
+			// Handle userConfigMap by trying to convert to map[string]any via reflection
+			// Try to convert any map[string]interface{} compatible type
+			if reflect.TypeOf(configMap).Kind() == reflect.Map {
+				if reflect.TypeOf(configMap).Key().Kind() == reflect.String {
+					// Convert to map[string]any using reflection
+					v := reflect.ValueOf(configMap)
+					promCfgMap = make(map[string]any)
+					for _, key := range v.MapKeys() {
+						promCfgMap[key.String()] = v.MapIndex(key).Interface()
+					}
+				} else {
+					fmt.Printf("[DEBUG] config field type assertion failed: %T\n", configMap)
+					return errors.New("invalid config field format")
+				}
+			} else {
+				fmt.Printf("[DEBUG] config field type assertion failed: %T\n", configMap)
+				return errors.New("invalid config field format")
+			}
 		}
-		return errors.New("invalid config field format")
+		cfg.PrometheusConfig = &PromConfig{}
+		return reloadPromConfig(cfg.PrometheusConfig, promCfgMap)
 	}
 	return errors.New("missing prometheus config field")
 }
