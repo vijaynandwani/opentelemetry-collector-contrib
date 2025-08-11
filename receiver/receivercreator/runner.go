@@ -180,13 +180,13 @@ func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discove
     if discoverable, ok := defaultCfg.(Discoverable); ok {
         if targetEndpoint != "" {
             // Debug: Log what we're about to pass to ValidateDiscovery
-            fmt.Printf("[DEBUG] runner.go: About to call ValidateDiscovery with discovered keys: %v\n", getDiscoveredKeys(discovered))
-            for k, v := range discovered {
-                fmt.Printf("[DEBUG] runner.go: discovered[%s] = %T: %v\n", k, v, v)
+            fmt.Printf("[DEBUG] runner.go: About to call ValidateDiscovery with templated keys: %v\n", getDiscoveredKeys(templated))
+            for k, v := range templated {
+                fmt.Printf("[DEBUG] runner.go: templated[%s] = %T: %v\n", k, v, v)
             }
             fmt.Printf("[DEBUG] runner.go: targetEndpoint = %s\n", targetEndpoint)
             
-            if err := discoverable.ValidateDiscovery(discovered, targetEndpoint); err != nil {
+            if err := discoverable.ValidateDiscovery(templated, targetEndpoint); err != nil {
                 return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
             }
         }
