@@ -159,7 +159,7 @@ func mergeTemplatedAndDiscoveredConfigs(factory rcvr.Factory, templated, discove
     defaultCfg := factory.CreateDefaultConfig()
     if discoverable, ok := defaultCfg.(Discoverable); ok {
         if targetEndpoint != "" {
-            if err := discoverable.ValidateDiscovery(templated, targetEndpoint); err != nil {
+            if err := discoverable.ValidateDiscovery(discovered, targetEndpoint); err != nil {
                 return nil, targetEndpoint, fmt.Errorf("discoverable validation failed: %w", err)
             }
         }
